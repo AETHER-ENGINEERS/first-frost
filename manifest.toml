@@ -1,0 +1,4 @@
+name = "First Frost"
+version = "3"
+description = "A co-op garden game for 1–4: frost creeps in from the west a column each round, and together you harvest, cloche, fleece and greenhouse enough of the garden to beat the goal. Dee designed it in SEASIDE one evening in November 2026 (her ideas: the greenhouse, sunflowers that ripen late, gentle/tight/hard levels), and Claude built it while they played. Their first garden: 18 of 18, then 24 of 20 on tight. Characters can play it too: its guide comes inside."
+source_code_url = "https://github.com/AETHER-ENGINEERS/first-frost"
