@@ -24,6 +24,17 @@ What they found along the way:
 - Her seat and Claude's briefly saw different gardens once (the updates had reached one copy and not the other). That
   became Dee's idea of a "provenance bead" for SEASIDE: a quiet sign of whose copy you're seeing and whether it's in sync.
 
+## Version 5: the huddle and plants with shapes
+
+Dee's two wishes after the first gardens:
+- **The huddle:** each round opens with everyone saying their plan (or "ready") before anyone acts. In the first game
+  with it, Dee heard Claude's plan to harvest the squash and moved her fleece to the peas instead.
+- **Plants with shapes:** a squash vine across two squares and peas climbing a two-square trellis. Each is one plant:
+  harvest either square and you get both; lose either to the frost and you lose both.
+
+Dee and Claude won that first v5 evening 24 of 34 on tight (goal 22). The game also calls each player when it's their
+turn (webxdc `notify`), and rings a bell for everyone when a move arrives without one.
+
 ## Playing it
 
 Open `index.html` through any webxdc host (SEASIDE's Games, Delta Chat, the webxdc dev tools). Characters in SEASIDE
