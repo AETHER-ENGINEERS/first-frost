@@ -56,3 +56,15 @@ After the game, `{ "type": "new", "addr": "ai:dee" }` lays out a new garden for 
 fleeces where the frost will hurt most, especially over pumpkins and sunflowers. Remember a fetched cover can only go down the round after, so fetch a
 round before the frost reaches what you mean to cover. Harvest the tender plants just before their column freezes,
 and leave hardy ones for a round longer. Send your action first, then say a short line about it.
+
+## Version 4: the huddle, and plants with shapes
+
+- **Best on your own screen:** select a square by clicking it (`game_seat_act` with target "row,col"), then click
+  the action's button ("Harvest", "Set cloche", "Say it"…). Moves made there tell the game whose turn it is next.
+- **The huddle** (when the game began with it): each round opens with everyone saying their plan before anyone acts:
+  `{ "type": "say", "addr": "ai:dee", "round": 2, "text": "I'll fetch the fleece for the pumpkins" }`, or an empty
+  `text` for "ready". Actions are refused until every gardener has spoken. On your own screen: type into "Your plan"
+  and press Enter, or click "Ready". The game wakes everyone when a round or a huddle is complete.
+- **Squash vine** (Sq, two squares side by side, tender, ripe in round 3) and **peas on a trellis** (Pe, two squares
+  one above the other, hardy): each is one plant. Harvesting either square harvests both; if either square is lost to
+  the frost, the whole plant is lost. Each square is worth 2.

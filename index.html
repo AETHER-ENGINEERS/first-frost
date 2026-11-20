@@ -64,6 +64,10 @@
       <button id="startBtn">Begin: gentle</button>
       <button id="startTightBtn">Begin: tight</button>
       <button id="startHardBtn">Begin: hard</button>
+      <label id="huddleWrap"><input type="checkbox" id="huddleBox" checked> Huddle each round (say your plans first)</label>
+      <input id="planInput" aria-label="Your plan" placeholder="Your plan for this round" maxlength="240">
+      <button id="sayBtn">Say it</button>
+      <button id="readyBtn">Ready</button>
       <button id="harvestBtn">Harvest</button>
       <button id="clocheBtn">Set cloche</button>
       <button id="fleeceBtn">Lay fleece (2×2)</button>
@@ -99,7 +103,12 @@ const PLANTS = {
   leeks:   { code: "Le", em: "🧅", name: "leeks", pl: true, hardy: true, pts: 1, line: "leek and potato soup by the fire" },
   carrots: { code: "Ca", em: "🥕", name: "carrots", pl: true, hardy: true, pts: 1, line: "carrots stored in a box of sand" },
   chard:   { code: "Ch", em: "🍃", name: "chard", hardy: true, pts: 1, line: "chard for the winter stew" },
+  // plants with shapes (Dee's idea, v4): one plant across two squares, saved only if both squares make it
+  squash:  { code: "Sq", em: "🥒", name: "squash vine", hardy: false, pts: 2, ripe: 3, shape: "two squares side by side", line: "squash soup with nutmeg" },
+  peas:    { code: "Pe", em: "🫛", name: "peas on a trellis", pl: true, hardy: true, pts: 2, shape: "two squares, one above the other", line: "a bag of frozen peas for summer memories" },
 };
+const MIX_V4 = ["tomato","tomato","basil","basil","beans","beans","pumpkin","pumpkin","sunflower","sunflower",
+             "kale","kale","kale","leeks","leeks","carrots","carrots","carrots","chard","chard"];
 const MIX_V3 = ["tomato","tomato","basil","basil","basil","beans","beans","pumpkin","pumpkin","pumpkin","sunflower","sunflower",
              "kale","kale","kale","leeks","leeks","leeks","carrots","carrots","carrots","chard","chard","chard"];
 const LEVELS = { gentle: -0.1, tight: 0, hard: 0.1 };
@@ -111,7 +120,7 @@ function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>>
 
 let S;
 function fresh() {
-  return { phase: "lobby", players: [], names: {}, hand: {}, acted: {}, round: 0, cells: [], shed: { fleece: 3, cloche: 2, greenhouse: 0 }, level: "tight",
+  return { huddle: false, said: {}, phase: "lobby", players: [], names: {}, hand: {}, acted: {}, round: 0, cells: [], shed: { fleece: 3, cloche: 2, greenhouse: 0 }, level: "tight",
            target: 0, log: [], end: null };
 }
 S = fresh();
@@ -139,9 +148,22 @@ function apply(p) {
   } else if (p.type === "start") {
     if (S.phase !== "lobby") return reject(p, "the evening has already begun");
     if (!S.players.length) return reject(p, "nobody has joined yet");
-    const rand = rng(Number(p.seed) || 1); const mix = (Number(p.v) >= 3 ? MIX_V3 : MIX).slice();
-    S.level = LEVELS[p.level] !== undefined ? p.level : "tight"; if (Number(p.v) >= 3) S.shed.greenhouse = 1;
+    const v = Number(p.v) || 1;
+    const rand = rng(Number(p.seed) || 1); const mix = (v >= 4 ? MIX_V4 : v >= 3 ? MIX_V3 : MIX).slice();
+    S.level = LEVELS[p.level] !== undefined ? p.level : "tight"; if (v >= 3) S.shed.greenhouse = 1;
+    S.huddle = v >= 4 && !!p.huddle;
     for (let i = mix.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [mix[i], mix[j]] = [mix[j], mix[i]]; }
+    if (v >= 4) {
+      // the shaped plants go down first, then the rest fill the beds around them
+      const grid = Array(ROWS * COLS).fill(null);
+      const sq = { r: Math.floor(rand() * ROWS), c: Math.floor(rand() * (COLS - 1)) };
+      grid[sq.r * COLS + sq.c] = { kind: "squash", g: "sq" }; grid[sq.r * COLS + sq.c + 1] = { kind: "squash", g: "sq" };
+      let pe;
+      do { pe = { r: Math.floor(rand() * (ROWS - 1)), c: Math.floor(rand() * COLS) }; } while (grid[pe.r * COLS + pe.c] || grid[(pe.r + 1) * COLS + pe.c]);
+      grid[pe.r * COLS + pe.c] = { kind: "peas", g: "pe" }; grid[(pe.r + 1) * COLS + pe.c] = { kind: "peas", g: "pe" };
+      let k = 0;
+      S.cells = grid.map((x, i) => ({ kind: x ? x.kind : mix[k++], ...(x ? { g: x.g } : {}), r: Math.floor(i / COLS), c: i % COLS, alive: true, harvested: false, covered: null }));
+    } else
     S.cells = mix.map((kind, i) => ({ kind, r: Math.floor(i / COLS), c: i % COLS, alive: true, harvested: false, covered: null }));
     S.phase = "play"; S.round = 1; S.acted = {};
     const share = Math.min(0.9, 0.45 + 0.1 * S.players.length + LEVELS[S.level]);
@@ -152,6 +174,7 @@ function apply(p) {
     if (!S.players.includes(a)) return reject(p, "you haven't joined this garden");
     if (Number(p.round) !== S.round) return reject(p, `it's round ${S.round}, not ${p.round}`);
     if (S.acted[a]) return reject(p, `you've already acted in round ${S.round}; wait for the others`);
+    if (S.huddle && !huddleDone()) return reject(p, `the huddle comes first: everyone says their plan (or "ready") before anyone acts. Still to speak: ${S.players.filter((q) => !(q in S.said)).map(nameOf).join(", ")}`);
     const r = Number(p.row), c = Number(p.col);
     const inGrid = (rr, cc) => Number.isInteger(rr) && Number.isInteger(cc) && rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS;
     const act = p.action;
@@ -161,7 +184,9 @@ function apply(p) {
       if (!x.alive) return reject(p, `the ${P.name} at row ${r}, col ${c} ${P.pl ? "have" : "has"} already died`);
       if (x.harvested) return reject(p, `the ${P.name} at row ${r}, col ${c} ${P.pl ? "are" : "is"} already harvested`);
       if (P.ripe && S.round < P.ripe) return reject(p, `the ${P.name} ${P.pl ? "aren't" : "isn't"} ripe until round ${P.ripe}`);
-      x.harvested = true; log(`${nameOf(a)} harvests the ${P.name} (row ${r}, col ${c}).`);
+      const whole = x.g ? S.cells.filter((y) => y.g === x.g) : [x];
+      if (whole.some((y) => !y.alive)) return reject(p, `part of the ${P.name} has died, so it can't be harvested`);
+      whole.forEach((y) => (y.harvested = true)); log(`${nameOf(a)} harvests the ${P.name} (row ${r}, col ${c}${whole.length > 1 ? ", both squares" : ""}).`);
     } else if (act === "cloche") {
       if (S.hand[a] !== "cloche") return reject(p, `you're carrying ${S.hand[a] ? "a " + S.hand[a] : "nothing"}, not a cloche`);
       if (!inGrid(r, c)) return reject(p, "that square isn't in the garden");
@@ -190,6 +215,17 @@ function apply(p) {
     } else return reject(p, `unknown action "${act}"`);
     S.acted[a] = true;
     if (S.players.every((q) => S.acted[q])) advance();
+  } else if (p.type === "bell") {
+    return; // only a wake-up call (see below)
+  } else if (p.type === "say") {
+    if (S.phase !== "play" || !S.huddle) return reject(p, "there's no huddle now");
+    if (!S.players.includes(a)) return reject(p, "you haven't joined this garden");
+    if (Number(p.round) !== S.round) return reject(p, `it's round ${S.round}, not ${p.round}`);
+    if (a in S.said) return reject(p, "you've already said your piece this round");
+    const text = String(p.text || "").trim().slice(0, 240);
+    S.said[a] = text;
+    log(text ? `${nameOf(a)}: “${text}”` : `${nameOf(a)} is ready.`);
+    if (huddleDone()) log(`Everyone has had their say. Round ${S.round}: act!`);
   } else if (p.type === "new") {
     if (S.phase === "play") return reject(p, "finish this evening first");
     const keep = S.players.map((q) => [q, S.names[q]]);
@@ -206,12 +242,15 @@ function advance() {
     const lvl = r - x.c; // the frost after round r
     if (lvl >= 2 || (lvl >= 1 && !PLANTS[x.kind].hardy)) { x.alive = false; died.push(x); }
   }
+  // a shaped plant is one plant: if one of its squares is lost, all of it is
+  for (const x of died.slice()) if (x.g) for (const y of S.cells) if (y.g === x.g && y.alive && !y.harvested) { y.alive = false; died.push(y); }
   const col = r - 1;
   if (col < COLS) log(`The frost reaches column ${col}${col > 0 ? `, and hardens on column ${col - 1}` : ""}.${died.length ? " Lost: " + died.map((x) => `${PLANTS[x.kind].name} (${x.r},${x.c})`).join(", ") + "." : " Nothing lost."}`);
   else log(`The hard frost settles on the last column.${died.length ? " Lost: " + died.map((x) => `${PLANTS[x.kind].name} (${x.r},${x.c})`).join(", ") + "." : ""}`);
   if (r >= LAST_ROUND) { finish(); return; }
-  S.round = r + 1; S.acted = {};
+  S.round = r + 1; S.acted = {}; S.said = {};
 }
+function huddleDone() { return S.players.every((q) => q in S.said); }
 
 function finish() {
   S.phase = "over"; S.end = true;
@@ -244,9 +283,9 @@ function render() {
     g.appendChild(d);
   }
   const L = document.getElementById("list");
-  L.innerHTML = S.cells.length ? "<b>The garden, row by row</b> (codes: To tomato, Ba basil, Be beans, Pu pumpkin, Su sunflowers, Ka kale, Le leeks, Ca carrots, Ch chard; ++ harvested, xx dead):" +
+  L.innerHTML = S.cells.length ? "<b>The garden, row by row</b> (codes: To tomato, Ba basil, Be beans, Pu pumpkin, Su sunflowers, Ka kale, Le leeks, Ca carrots, Ch chard, Sq squash vine and Pe peas, each one plant across two squares; ++ harvested, xx dead):" +
     Array.from({ length: ROWS }, (_, r) => `<div>Row ${r}: ` + Array.from({ length: COLS }, (_, c) => { const x = cell(r, c), P = PLANTS[x.kind];
-      const st = x.harvested ? "harvested" : !x.alive ? "dead" : [P.hardy ? "hardy" : "tender", x.covered ? "under " + x.covered : "", P.ripe && S.round < P.ripe ? "not ripe until round " + P.ripe : ""].filter(Boolean).join(", ");
+      const st = x.harvested ? "harvested" : !x.alive ? "dead" : [P.hardy ? "hardy" : "tender", P.shape ? "one plant across " + P.shape : "", x.covered ? "under " + x.covered : "", P.ripe && S.round < P.ripe ? "not ripe until round " + P.ripe : ""].filter(Boolean).join(", ");
       return `col ${c} ${x.kind} (${st})`; }).join("; ") + "</div>").join("") : "";
   const joined = S.players.includes(self);
   document.getElementById("roundChip").textContent = S.phase === "lobby" ? "Waiting to begin" : S.phase === "play" ? `Round ${S.round} of ${LAST_ROUND}` : "Morning";
@@ -255,12 +294,15 @@ function render() {
   document.getElementById("savedChip").textContent = S.cells.length ? `Safe: ${inBasket + underCover} (${inBasket} harvested, ${underCover} covered) · goal ${S.target} of ${totalPts()}${S.level ? " · " + S.level : ""}` : "";
   document.getElementById("shedChip").textContent = `Shed: ${S.shed.fleece} fleece, ${S.shed.cloche} cloche${S.shed.greenhouse ? ", the greenhouse" : ""}`;
   document.getElementById("players").innerHTML = "<b>Gardeners</b>" + (S.players.length ? S.players.map((q) =>
-    `<div>${nameOf(q)}${q === self ? " (you)" : ""}: carrying ${S.hand[q] || "nothing"}${S.phase === "play" ? (S.acted[q] ? " · done this round" : " · still to act") : ""}</div>`).join("") : "<div>Nobody yet.</div>");
-  const mine = S.phase === "play" && joined && !S.acted[self];
+    `<div>${nameOf(q)}${q === self ? " (you)" : ""}: carrying ${S.hand[q] || "nothing"}${S.phase === "play" ? (S.huddle && !huddleDone() ? (q in S.said ? " · has spoken" : " · still to speak") : S.acted[q] ? " · done this round" : " · still to act") : ""}</div>`).join("") : "<div>Nobody yet.</div>");
+  const huddling = S.phase === "play" && joined && S.huddle && !huddleDone();
+  const mine = S.phase === "play" && joined && !S.acted[self] && !huddling;
   let status;
   if (S.phase === "lobby") status = joined ? "You're in. Anyone can begin the evening once everyone has joined." : "Join the garden to play.";
   else if (S.phase === "over") status = S.endWin ? "The garden made it through. 🌅" : "The frost won this time.";
   else if (!joined) status = "You're watching this evening.";
+  else if (S.huddle && !huddleDone()) status = (self in S.said ? "You've said your piece. " : "Huddle: say your plan for this round (or press Ready) before anyone acts. ") +
+    "Said so far: " + (S.players.filter((q) => q in S.said).map((q) => `${nameOf(q)}: ${S.said[q] ? "“" + S.said[q] + "”" : "ready"}`).join("; ") || "nobody yet") + ".";
   else if (S.acted[self]) status = "You've acted this round. Waiting for: " + S.players.filter((q) => !S.acted[q]).map(nameOf).join(", ");
   else status = `Your action for round ${S.round}. You carry ${S.hand[self] || "nothing"}.` + (sel ? ` Selected: row ${sel.r}, col ${sel.c}.` : " Select a square first for harvest, cloche or fleece (the fleece's top-left corner).");
   document.getElementById("status").textContent = status;
@@ -270,10 +312,14 @@ function render() {
   on("harvestBtn", mine && sel); on("clocheBtn", mine && sel && S.hand[self] === "cloche"); on("fleeceBtn", mine && sel && S.hand[self] === "fleece");
   on("fetchFleeceBtn", mine && !S.hand[self] && S.shed.fleece > 0); on("fetchClocheBtn", mine && !S.hand[self] && S.shed.cloche > 0);
   on("waitBtn", mine); on("newBtn", S.phase === "over");
+  const speak = huddling && !(self in S.said);
+  for (const id of ["planInput", "sayBtn", "readyBtn"]) document.getElementById(id).hidden = !speak;
+  document.getElementById("huddleWrap").hidden = S.phase !== "lobby";
   const ep = document.getElementById("endPanel");
   if (S.phase === "over") {
     ep.hidden = false;
-    const kept = S.cells.filter((x) => x.harvested || x.alive);
+    // (a plant across two squares is one plant: listed once)
+    const kept = S.cells.filter((x, i) => (x.harvested || x.alive) && (!x.g || S.cells.findIndex((y) => y.g === x.g) === i));
     const lines = kept.map((x) => `<li>${PLANTS[x.kind].em} ${x.harvested ? `The ${PLANTS[x.kind].name} became ${PLANTS[x.kind].line}.` : `Under the ${x.covered}, the ${PLANTS[x.kind].name} ${PLANTS[x.kind].pl ? "live" : "lives"} on into winter.`}</li>`);
     ep.innerHTML = `<div class="end"><b>${S.endWin ? "The harvest" : "What you saved"}: ${savedPts()} of ${totalPts()} (goal ${S.target})</b><ul>${lines.join("") || "<li>Nothing, this time.</li>"}</ul></div>`;
   } else ep.hidden = true;
@@ -281,10 +327,36 @@ function render() {
 }
 
 function send(payload, info) { payload.addr = self; window.webxdc.sendUpdate({ payload, info }, info || ""); }
-function act(action, extra = {}) { send({ type: "act", round: S.round, action, ...extra }, `${selfName}: ${action}`); }
+// who's left to act or speak, to wake them (webxdc notify): when this move completes a round or a huddle, everyone
+function notifyAfter(kind) {
+  const others = S.players.filter((q) => q !== self);
+  if (kind === "act") {
+    const last = others.every((q) => S.acted[q]);
+    if (!last) return undefined;
+    return Object.fromEntries(S.players.map((q) => [q, S.huddle ? `Round ${S.round + 1}: huddle first, say your plan` : `Round ${S.round + 1}: your action`]));
+  }
+  const last = others.every((q) => q in S.said);
+  return last ? Object.fromEntries(S.players.map((q) => [q, `Round ${S.round}: everyone has spoken, act now`])) : undefined;
+}
+function act(action, extra = {}) {
+  const notify = S.round < LAST_ROUND || !S.players.filter((q) => q !== self).every((q) => S.acted[q]) ? notifyAfter("act") : undefined;
+  const payload = { type: "act", round: S.round, action, ...extra, addr: self };
+  window.webxdc.sendUpdate({ payload, info: `${selfName}: ${action}`, ...(notify ? { notify } : {}) }, "");
+}
+function say(text) {
+  const notify = notifyAfter("say");
+  window.webxdc.sendUpdate({ payload: { type: "say", round: S.round, text, addr: self }, info: text ? `${selfName}: ${text}` : `${selfName} is ready`, ...(notify ? { notify } : {}) }, "");
+}
+document.getElementById("sayBtn").onclick = () => { const el = document.getElementById("planInput"); const t = el.value.trim(); if (!t) return console.warn("[firstfrost] rejected say: write your plan, or press Ready"); el.value = ""; say(t); };
+document.getElementById("readyBtn").onclick = () => say("");
+document.getElementById("planInput").onkeydown = (e) => { if (e.key === "Enter") document.getElementById("sayBtn").click(); };
 document.getElementById("joinBtn").onclick = () => send({ type: "join", name: selfName }, `${selfName} joined the garden`);
 for (const [id, level] of [["startBtn", "gentle"], ["startTightBtn", "tight"], ["startHardBtn", "hard"]])
-  document.getElementById(id).onclick = () => send({ type: "start", v: 3, level, seed: Math.floor(Math.random() * 1e9) }, `The evening begins (${level})`);
+  document.getElementById(id).onclick = () => {
+    const huddle = document.getElementById("huddleBox").checked;
+    window.webxdc.sendUpdate({ payload: { type: "start", v: 4, level, huddle, seed: Math.floor(Math.random() * 1e9), addr: self }, info: `The evening begins (${level})`,
+      notify: Object.fromEntries(S.players.map((q) => [q, huddle ? "Round 1: huddle first, say your plan" : "Round 1: your action"])) }, "");
+  };
 document.getElementById("fetchGhBtn").onclick = () => act("fetch", { item: "greenhouse" });
 document.getElementById("ghBtn").onclick = () => sel && act("greenhouse", { col: sel.c });
 document.getElementById("harvestBtn").onclick = () => sel && act("harvest", { row: sel.r, col: sel.c });
@@ -295,7 +367,18 @@ document.getElementById("fetchClocheBtn").onclick = () => act("fetch", { item: "
 document.getElementById("waitBtn").onclick = () => act("wait");
 document.getElementById("newBtn").onclick = () => send({ type: "new" }, "A new garden");
 
-window.webxdc.setUpdateListener((u) => { apply(u.payload); render(); }, 0);
+// A move sent straight as an update (not from a screen's buttons) carries no wake-up call; when such a move ends a
+// round or a huddle, the first gardener's copy rings a bell that wakes everyone. Only live updates, never on replay.
+window.webxdc.setUpdateListener((u) => {
+  const before = `${S.round}|${S.huddle && huddleDone()}`;
+  apply(u.payload);
+  const after = `${S.round}|${S.huddle && huddleDone()}`;
+  if (before !== after && S.phase === "play" && !u.notify && u.serial === u.max_serial && S.players[0] === self) {
+    const line = S.huddle && !huddleDone() ? `Round ${S.round}: huddle first, say your plan` : `Round ${S.round}: act now`;
+    window.webxdc.sendUpdate({ payload: { type: "bell", round: S.round, addr: self }, info: line, notify: Object.fromEntries(S.players.map((q) => [q, line])) }, "");
+  }
+  render();
+}, 0);
 render();
 </script>
 </body>
